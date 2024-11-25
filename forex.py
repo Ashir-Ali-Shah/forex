@@ -1,114 +1,99 @@
-import pandas as pd
-import numpy as np
-import yfinance as yf
 import streamlit as st
-from ta.trend import SMAIndicator, EMAIndicator
-from ta.momentum import RSIIndicator
+import yfinance as yf
+import pandas as pd
+import plotly.graph_objects as go
 
+# Sidebar for User Inputs
+st.sidebar.title("Trade Signal Configurations")
 
-class TradingModel:
-    def __init__(self, currency_pair, account_balance, risk_percent, stop_loss_pips, pip_value):
-        self.currency_pair = currency_pair
-        self.account_balance = account_balance
-        self.risk_percent = risk_percent
-        self.stop_loss_pips = stop_loss_pips
-        self.pip_value = pip_value
-        self.data = None
+# Currency Pair Selection
+currency_pairs = {
+    "XAUUSD": "GC=F",  # Gold futures
+    "EURUSD": "EURUSD=X",  # Euro to USD Forex
+    "GBPUSD": "GBPUSD=X",  # British Pound to USD Forex
+    "USDJPY": "USDJPY=X",  # USD to Japanese Yen Forex
+}
+selected_pair = st.sidebar.selectbox("Select Currency Pair", list(currency_pairs.keys()))
+ticker_symbol = currency_pairs[selected_pair]
 
-    def fetch_data(self, interval="1d", period="1mo"):
-        ticker_map = {
-            "XAUUSD": "GC=F",
-            "EURUSD": "EURUSD=X",
-            "GBPUSD": "GBPUSD=X",
-            "USDJPY": "JPY=X"
-        }
-        ticker = ticker_map.get(self.currency_pair, self.currency_pair)
-        try:
-            self.data = yf.download(ticker, period=period, interval=interval)
-            if self.data.empty:
-                raise ValueError("No data fetched. Please check the currency pair or network connection.")
-            
-            # Ensure data['Close'] is a pandas Series (1-dimensional)
-            close_prices = self.data['Close'].squeeze()
+# Account Balance and Lot Size Inputs
+account_balance = st.sidebar.number_input("Account Balance (USD)", min_value=0.0, value=1000.0, step=100.0)
+risk_percentage = st.sidebar.slider("Risk Percentage (%)", min_value=0, max_value=10, value=2)
 
-            # Calculate Indicators
-            self.data['SMA'] = SMAIndicator(close_prices, window=14).sma_indicator()
-            self.data['EMA'] = EMAIndicator(close_prices, window=14).ema_indicator()
-            self.data['RSI'] = RSIIndicator(close_prices, window=14).rsi()
+# Function to calculate lot size
+def calculate_lot_size(balance, risk_percent, entry_price, stop_loss):
+    risk_amount = balance * (risk_percent / 100)
+    pip_risk = abs(entry_price - stop_loss)
+    lot_size = risk_amount / pip_risk
+    return round(lot_size, 2)
 
-            # Drop rows with NaN values (caused by insufficient data for indicators)
-            self.data.dropna(inplace=True)
-        except Exception as e:
-            raise ValueError(f"Error fetching data: {e}")
+# Fetch historical data using yfinance
+def fetch_data(symbol, period="1d", interval="1m"):
+    data = yf.download(tickers=symbol, period=period, interval=interval)
+    data.reset_index(inplace=True)
+    return data
 
-    def generate_signal(self):
-        if self.data is None or self.data.empty:
-            raise ValueError("Data not loaded or insufficient data for generating signals.")
-        
-        # Extract the last row and ensure scalar values
-        last_row = self.data.iloc[-1]
-        rsi = float(last_row['RSI'])
-        close = float(last_row['Close'])
-        sma = float(last_row['SMA'])
+# Generate Trade Signal
+def generate_signal(data):
+    # Example trading logic: Moving Average Crossover
+    short_window = 10  # Short-term moving average
+    long_window = 50  # Long-term moving average
+    data["SMA10"] = data["Close"].rolling(window=short_window).mean()
+    data["SMA50"] = data["Close"].rolling(window=long_window).mean()
+    
+    if data["SMA10"].iloc[-1] > data["SMA50"].iloc[-1]:  # Buy signal
+        return "Buy", data["Close"].iloc[-1]
+    else:  # Sell signal
+        return "Sell", data["Close"].iloc[-1]
 
-        # Generate signals based on conditions
-        if rsi < 30 and close > sma:
-            take_profit = close + (self.stop_loss_pips * self.pip_value)
-            stop_loss = close - (self.stop_loss_pips * self.pip_value)
-            return "Buy", close, take_profit, stop_loss
-        elif rsi > 70 and close < sma:
-            take_profit = close - (self.stop_loss_pips * self.pip_value)
-            stop_loss = close + (self.stop_loss_pips * self.pip_value)
-            return "Sell", close, take_profit, stop_loss
-        else:
-            return "Hold", close, None, None
+# Main Interface
+st.title("Trade Signal Generator with yfinance")
 
-    def calculate_lot_size(self):
-        risk_amount = self.account_balance * (self.risk_percent / 100)
-        lot_size = risk_amount / (self.stop_loss_pips * self.pip_value)
-        return round(lot_size, 2)
+# Fetch data and generate signal
+data = fetch_data(ticker_symbol, period="5d", interval="15m")
 
+if not data.empty:
+    signal, entry_price = generate_signal(data)
+    stop_loss = entry_price * 0.995  # Example: Stop loss 0.5% below entry
+    lot_size = calculate_lot_size(account_balance, risk_percentage, entry_price, stop_loss)
 
-# Streamlit App
-def main():
-    st.title("Forex Trading Signal Generator")
+    # Display Signal
+    st.write(f"**{selected_pair} - {signal} Signal**")
+    st.write(f"Entry Price: {entry_price}")
+    st.write(f"Lot Size: {lot_size}")
+    st.write(f"Stop Loss: {stop_loss}")
 
-    # Sidebar inputs for user parameters
-    st.sidebar.header("User Inputs")
-    currency_pair = st.sidebar.selectbox("Select Currency Pair", ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY"])
-    account_balance = st.sidebar.number_input("Account Balance (USD)", min_value=100.0, value=1000.0)
-    risk_percent = st.sidebar.slider("Risk Percentage (%)", min_value=0.1, max_value=5.0, value=1.0, step=0.1)
-    stop_loss_pips = st.sidebar.number_input("Stop Loss (in Pips)", min_value=10, value=50)
-    pip_value = st.sidebar.number_input("Pip Value (USD)", min_value=0.01, value=10.0)
-    interval = st.sidebar.selectbox("Select Data Interval", ["1d", "1h", "5m", "1wk"])
+    # Chart Visualization
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(
+        x=data["Datetime"],
+        open=data["Open"],
+        high=data["High"],
+        low=data["Low"],
+        close=data["Close"],
+        name="Candlesticks"
+    ))
+    fig.add_trace(go.Scatter(
+        x=data["Datetime"],
+        y=data["SMA10"],
+        mode="lines",
+        name="SMA10"
+    ))
+    fig.add_trace(go.Scatter(
+        x=data["Datetime"],
+        y=data["SMA50"],
+        mode="lines",
+        name="SMA50"
+    ))
+    fig.add_trace(go.Scatter(
+        x=[data["Datetime"].iloc[-1]],
+        y=[entry_price],
+        mode='markers+text',
+        text=["Entry"],
+        textposition="top center",
+        name="Entry Point"
+    ))
+    st.plotly_chart(fig)
 
-    # Run model when user clicks button
-    if st.sidebar.button("Generate Signal"):
-        # Initialize the trading model
-        model = TradingModel(currency_pair, account_balance, risk_percent, stop_loss_pips, pip_value)
-
-        # Fetch data
-        try:
-            st.write(f"Fetching data for {currency_pair}...")
-            model.fetch_data(interval=interval)
-
-            # Generate signal
-            signal, entry_price, take_profit, stop_loss = model.generate_signal()
-            st.write(f"**Trade Signal:** {signal}")
-            st.write(f"**Entry Price:** {entry_price}")
-            if signal != "Hold":
-                st.write(f"**Take Profit:** {take_profit}")
-                st.write(f"**Stop Loss:** {stop_loss}")
-
-            # Calculate lot size
-            lot_size = model.calculate_lot_size()
-            st.write(f"**Recommended Lot Size:** {lot_size} lots")
-
-            # Display data and indicators
-            st.line_chart(model.data[['Close', 'SMA', 'EMA']])
-        except ValueError as e:
-            st.error(e)
-
-
-if __name__ == "__main__":
-    main()
+else:
+    st.write("Failed to fetch data for the selected pair.")
