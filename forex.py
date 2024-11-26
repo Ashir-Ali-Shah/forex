@@ -55,14 +55,17 @@ def generate_signal(data):
     data["SMA10"] = data["Close"].rolling(window=short_window).mean()
     data["SMA50"] = data["Close"].rolling(window=long_window).mean()
 
-    # Ensure both moving averages are calculated
     if pd.isna(data["SMA10"].iloc[-1]) or pd.isna(data["SMA50"].iloc[-1]):
         raise ValueError("Not enough data to calculate moving averages.")
 
+    last_close = data["Close"].iloc[-1]
+    if pd.isna(last_close):
+        raise ValueError("Last close price is not valid.")
+
     if data["SMA10"].iloc[-1] > data["SMA50"].iloc[-1]:
-        return "Buy", float(data["Close"].iloc[-1])
+        return "Buy", float(last_close)
     else:
-        return "Sell", float(data["Close"].iloc[-1])
+        return "Sell", float(last_close)
 
 # Backtesting strategy performance
 def backtest_strategy(data):
