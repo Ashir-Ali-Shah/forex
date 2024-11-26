@@ -28,20 +28,25 @@ ticker_symbol = currency_pairs[selected_pair]
 
 # Function to calculate lot size
 def calculate_lot_size(balance, risk_percent, entry_price, stop_loss):
-    entry_price = float(entry_price)
-    stop_loss = float(stop_loss)
-    risk_amount = balance * (risk_percent / 100)
-    pip_risk = abs(entry_price - stop_loss)
-    if pip_risk == 0:
-        return 0
-    lot_size = risk_amount / pip_risk
-    return round(lot_size, 2)
+    try:
+        entry_price = float(entry_price)
+        stop_loss = float(stop_loss)
+        risk_amount = balance * (risk_percent / 100)
+        pip_risk = abs(entry_price - stop_loss)
+        if pip_risk == 0:
+            return 0
+        lot_size = risk_amount / pip_risk
+        return round(lot_size, 2)
+    except Exception as e:
+        raise ValueError(f"Error calculating lot size: {e}")
 
 # Fetch historical data using yfinance
 @st.cache_data
 def fetch_data(symbol, period="5d", interval="15m"):
     try:
         data = yf.download(tickers=symbol, period=period, interval=interval, progress=False)
+        if data.empty:
+            raise ValueError("No data fetched from yfinance.")
         data.reset_index(inplace=True)
         return data
     except Exception as e:
@@ -50,48 +55,57 @@ def fetch_data(symbol, period="5d", interval="15m"):
 
 # Generate Trade Signal
 def generate_signal(data):
-    short_window = 10
-    long_window = 50
-    data["SMA10"] = data["Close"].rolling(window=short_window).mean()
-    data["SMA50"] = data["Close"].rolling(window=long_window).mean()
+    try:
+        short_window = 10
+        long_window = 50
+        data["SMA10"] = data["Close"].rolling(window=short_window).mean()
+        data["SMA50"] = data["Close"].rolling(window=long_window).mean()
 
-    if pd.isna(data["SMA10"].iloc[-1]) or pd.isna(data["SMA50"].iloc[-1]):
-        raise ValueError("Not enough data to calculate moving averages.")
+        if pd.isna(data["SMA10"].iloc[-1]) or pd.isna(data["SMA50"].iloc[-1]):
+            raise ValueError("Not enough data to calculate moving averages.")
 
-    last_close = data["Close"].iloc[-1]
-    if pd.isna(last_close):
-        raise ValueError("Last close price is not valid.")
+        last_close = data["Close"].iloc[-1]
+        if pd.isna(last_close) or not isinstance(last_close, (int, float)):
+            raise ValueError("Last close price is not valid.")
 
-    if data["SMA10"].iloc[-1] > data["SMA50"].iloc[-1]:
-        return "Buy", float(last_close)
-    else:
-        return "Sell", float(last_close)
+        if data["SMA10"].iloc[-1] > data["SMA50"].iloc[-1]:
+            return "Buy", float(last_close)
+        else:
+            return "Sell", float(last_close)
+    except Exception as e:
+        raise ValueError(f"Error generating signal: {e}")
 
 # Backtesting strategy performance
 def backtest_strategy(data):
-    data["Signal"] = data["SMA10"] > data["SMA50"]
-    data["Daily Return"] = data["Close"].pct_change()
-    data["Strategy Return"] = data["Signal"].shift(1) * data["Daily Return"]
-    cumulative_strategy_return = (1 + data["Strategy Return"]).cumprod()
-    return cumulative_strategy_return, data
+    try:
+        data["Signal"] = data["SMA10"] > data["SMA50"]
+        data["Daily Return"] = data["Close"].pct_change()
+        data["Strategy Return"] = data["Signal"].shift(1) * data["Daily Return"]
+        cumulative_strategy_return = (1 + data["Strategy Return"]).cumprod()
+        return cumulative_strategy_return, data
+    except Exception as e:
+        raise ValueError(f"Error during backtesting: {e}")
 
 # Plotting function using Matplotlib
 def plot_chart(data, signal, entry_price, stop_loss, take_profit):
-    fig, ax = plt.subplots(figsize=(12, 8))
-    mpf.plot(data.set_index("Datetime"), type="candle", style="charles", ax=ax, mav=(10, 50), volume=False)
-    ax.plot(data["Datetime"], data["SMA10"], label="SMA10", color="blue")
-    ax.plot(data["Datetime"], data["SMA50"], label="SMA50", color="orange")
-    ax.scatter(data["Datetime"].iloc[-1], entry_price, color="green", label=f"Entry: {signal}", zorder=5)
-    ax.axhline(stop_loss, color="red", linestyle="--", label="Stop Loss")
-    ax.axhline(take_profit, color="green", linestyle="--", label="Take Profit")
-    ax.set_title(f"{selected_pair} Trade Signal")
-    ax.set_ylabel("Price")
-    ax.legend()
-    ax.grid()
-    ax.xaxis.set_major_locator(AutoDateLocator())
-    ax.xaxis.set_major_formatter(DateFormatter("%Y-%m-%d %H:%M"))
-    fig.autofmt_xdate()
-    st.pyplot(fig)
+    try:
+        fig, ax = plt.subplots(figsize=(12, 8))
+        mpf.plot(data.set_index("Datetime"), type="candle", style="charles", ax=ax, mav=(10, 50), volume=False)
+        ax.plot(data["Datetime"], data["SMA10"], label="SMA10", color="blue")
+        ax.plot(data["Datetime"], data["SMA50"], label="SMA50", color="orange")
+        ax.scatter(data["Datetime"].iloc[-1], entry_price, color="green", label=f"Entry: {signal}", zorder=5)
+        ax.axhline(stop_loss, color="red", linestyle="--", label="Stop Loss")
+        ax.axhline(take_profit, color="green", linestyle="--", label="Take Profit")
+        ax.set_title(f"{selected_pair} Trade Signal")
+        ax.set_ylabel("Price")
+        ax.legend()
+        ax.grid()
+        ax.xaxis.set_major_locator(AutoDateLocator())
+        ax.xaxis.set_major_formatter(DateFormatter("%Y-%m-%d %H:%M"))
+        fig.autofmt_xdate()
+        st.pyplot(fig)
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
 
 # Main Execution
 st.title("Forex Trade Signal Generator")
