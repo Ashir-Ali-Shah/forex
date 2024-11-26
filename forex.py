@@ -1,20 +1,21 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import mplfinance as mpf
+from ta.trend import SMAIndicator
 from matplotlib.dates import DateFormatter, AutoDateLocator
 
 # Currency Pair Selection
 currency_pairs = {
-    "XAUUSD": "GC=F",  # Gold futures
-    "EURUSD": "EURUSD=X",  # Euro to USD Forex
-    "GBPUSD": "GBPUSD=X",  # British Pound to USD Forex
-    "USDJPY": "USDJPY=X",  # USD to Japanese Yen Forex
-    "AUDUSD": "AUDUSD=X",  # Australian Dollar to USD Forex
-    "NZDUSD": "NZDUSD=X",  # New Zealand Dollar to USD Forex
-    "USDCAD": "USDCAD=X",  # USD to Canadian Dollar Forex
-    "USDCHF": "USDCHF=X",  # USD to Swiss Franc Forex
+    "XAUUSD": "Gold",
+    "EURUSD": "Euro/USD",
+    "GBPUSD": "Pound/USD",
+    "USDJPY": "USD/Yen",
+    "AUDUSD": "AUD/USD",
+    "NZDUSD": "NZD/USD",
+    "USDCAD": "USD/CAD",
+    "USDCHF": "USD/CHF",
 }
 
 # Streamlit Sidebar
@@ -24,13 +25,9 @@ account_balance = st.sidebar.number_input("Account Balance (USD)", min_value=0.0
 risk_percentage = st.sidebar.slider("Risk Percentage (%)", min_value=0.0, max_value=10.0, value=2.0, step=0.1)
 risk_reward_ratio = st.sidebar.slider("Risk/Reward Ratio", min_value=1.0, max_value=5.0, value=2.0, step=0.1)
 
-ticker_symbol = currency_pairs[selected_pair]
-
 # Function to calculate lot size
 def calculate_lot_size(balance, risk_percent, entry_price, stop_loss):
     try:
-        entry_price = float(entry_price)
-        stop_loss = float(stop_loss)
         risk_amount = balance * (risk_percent / 100)
         pip_risk = abs(entry_price - stop_loss)
         if pip_risk == 0:
@@ -41,26 +38,27 @@ def calculate_lot_size(balance, risk_percent, entry_price, stop_loss):
         st.error(f"Error calculating lot size: {e}")
         return 0
 
-# Fetch historical data using yfinance
+# Generate mock data for demonstration purposes
 @st.cache_data
-def fetch_data(symbol, period="5d", interval="15m"):
-    try:
-        data = yf.download(tickers=symbol, period=period, interval=interval, progress=False)
-        if data.empty:
-            raise ValueError("No data fetched from yfinance.")
-        data.reset_index(inplace=True)
-        return data
-    except Exception as e:
-        st.error(f"Error fetching data: {e}")
-        return pd.DataFrame()
+def fetch_data():
+    np.random.seed(42)
+    date_range = pd.date_range(end=pd.Timestamp.now(), periods=100, freq="15T")
+    prices = np.cumsum(np.random.randn(len(date_range)) * 0.1 + 0.5) + 100
+    data = pd.DataFrame({"Datetime": date_range, "Close": prices})
+    data["Open"] = data["Close"] + np.random.randn(len(data)) * 0.1
+    data["High"] = data[["Close", "Open"]].max(axis=1) + np.random.rand(len(data)) * 0.2
+    data["Low"] = data[["Close", "Open"]].min(axis=1) - np.random.rand(len(data)) * 0.2
+    data.set_index("Datetime", inplace=True)
+    return data
 
 # Generate Trade Signal
 def generate_signal(data):
     try:
         short_window = 10
         long_window = 50
-        data["SMA10"] = data["Close"].rolling(window=short_window).mean()
-        data["SMA50"] = data["Close"].rolling(window=long_window).mean()
+
+        data["SMA10"] = SMAIndicator(data["Close"], window=short_window).sma_indicator()
+        data["SMA50"] = SMAIndicator(data["Close"], window=long_window).sma_indicator()
 
         if data.empty or pd.isna(data["Close"].iloc[-1]):
             raise ValueError("Data is invalid or insufficient for generating signals.")
@@ -80,26 +78,14 @@ def generate_signal(data):
         st.error(f"Error generating trade signal: {e}")
         return "No Signal", 0.0
 
-# Backtesting strategy performance
-def backtest_strategy(data):
-    try:
-        data["Signal"] = data["SMA10"] > data["SMA50"]
-        data["Daily Return"] = data["Close"].pct_change()
-        data["Strategy Return"] = data["Signal"].shift(1) * data["Daily Return"]
-        cumulative_strategy_return = (1 + data["Strategy Return"]).cumprod()
-        return cumulative_strategy_return, data
-    except Exception as e:
-        st.error(f"Error during backtesting: {e}")
-        return pd.Series(), data
-
 # Plotting function using Matplotlib
 def plot_chart(data, signal, entry_price, stop_loss, take_profit):
     try:
         fig, ax = plt.subplots(figsize=(12, 8))
-        mpf.plot(data.set_index("Datetime"), type="candle", style="charles", ax=ax, mav=(10, 50), volume=False)
-        ax.plot(data["Datetime"], data["SMA10"], label="SMA10", color="blue")
-        ax.plot(data["Datetime"], data["SMA50"], label="SMA50", color="orange")
-        ax.scatter(data["Datetime"].iloc[-1], entry_price, color="green", label=f"Entry: {signal}", zorder=5)
+        mpf.plot(data, type="candle", style="charles", ax=ax, mav=(10, 50), volume=False)
+        ax.plot(data.index, data["SMA10"], label="SMA10", color="blue")
+        ax.plot(data.index, data["SMA50"], label="SMA50", color="orange")
+        ax.scatter(data.index[-1], entry_price, color="green", label=f"Entry: {signal}", zorder=5)
         ax.axhline(stop_loss, color="red", linestyle="--", label="Stop Loss")
         ax.axhline(take_profit, color="green", linestyle="--", label="Take Profit")
         ax.set_title(f"{selected_pair} Trade Signal")
@@ -117,7 +103,7 @@ def plot_chart(data, signal, entry_price, stop_loss, take_profit):
 st.title("Forex Trade Signal Generator")
 
 st.write(f"Fetching data for {selected_pair}...")
-data = fetch_data(ticker_symbol, period="5d", interval="15m")
+data = fetch_data()
 
 if not data.empty:
     try:
@@ -142,11 +128,6 @@ if not data.empty:
             st.write(f"- Stop Loss: **{stop_loss:.2f}**")
             st.write(f"- Take Profit: **{take_profit:.2f}**")
             st.write(f"- Lot Size: **{lot_size:.2f}**")
-
-            cumulative_strategy_return, backtest_data = backtest_strategy(data)
-            if not cumulative_strategy_return.empty:
-                st.write("### Backtest Performance")
-                st.line_chart(cumulative_strategy_return)
 
             plot_chart(data, signal, entry_price, stop_loss, take_profit)
     except Exception as e:
