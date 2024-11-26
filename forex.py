@@ -122,7 +122,8 @@ data = fetch_data(ticker_symbol, period="5d", interval="15m")
 if not data.empty:
     try:
         signal, entry_price = generate_signal(data)
-        st.write(f"Debug - Entry Price: {entry_price}")  # Debugging entry_price
+        st.write(f"Debug - Entry Price: {entry_price}")
+        
         if entry_price == 0 or pd.isna(entry_price):
             st.error("Failed to generate a valid entry price.")
         else:
@@ -132,7 +133,12 @@ if not data.empty:
 
             st.write(f"### Trade Signal for {selected_pair}")
             st.write(f"- Signal: **{signal}**")
-            st.write(f"- Entry Price: **{entry_price:.2f}**")
+            
+            if isinstance(entry_price, (int, float)) and not pd.isna(entry_price):
+                st.write(f"- Entry Price: **{entry_price:.2f}**")
+            else:
+                st.error("Invalid entry price. Unable to format entry price.")
+            
             st.write(f"- Stop Loss: **{stop_loss:.2f}**")
             st.write(f"- Take Profit: **{take_profit:.2f}**")
             st.write(f"- Lot Size: **{lot_size:.2f}**")
