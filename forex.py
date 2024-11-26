@@ -38,7 +38,8 @@ def calculate_lot_size(balance, risk_percent, entry_price, stop_loss):
         lot_size = risk_amount / pip_risk
         return round(lot_size, 2)
     except Exception as e:
-        raise ValueError(f"Error calculating lot size: {e}")
+        st.error(f"Error calculating lot size: {e}")
+        return 0
 
 # Fetch historical data using yfinance
 @st.cache_data
@@ -61,19 +62,23 @@ def generate_signal(data):
         data["SMA10"] = data["Close"].rolling(window=short_window).mean()
         data["SMA50"] = data["Close"].rolling(window=long_window).mean()
 
-        if pd.isna(data["SMA10"].iloc[-1]) or pd.isna(data["SMA50"].iloc[-1]):
-            raise ValueError("Not enough data to calculate moving averages.")
+        if data.empty or pd.isna(data["Close"].iloc[-1]):
+            raise ValueError("Data is invalid or insufficient for generating signals.")
 
-        last_close = data["Close"].iloc[-1]
+        last_close = float(data["Close"].iloc[-1])
         if pd.isna(last_close) or not isinstance(last_close, (int, float)):
-            raise ValueError("Last close price is not valid.")
+            raise ValueError("Invalid close price.")
+
+        if pd.isna(data["SMA10"].iloc[-1]) or pd.isna(data["SMA50"].iloc[-1]):
+            raise ValueError("Moving averages could not be calculated. Not enough data.")
 
         if data["SMA10"].iloc[-1] > data["SMA50"].iloc[-1]:
-            return "Buy", float(last_close)
+            return "Buy", last_close
         else:
-            return "Sell", float(last_close)
+            return "Sell", last_close
     except Exception as e:
-        raise ValueError(f"Error generating signal: {e}")
+        st.error(f"Error generating trade signal: {e}")
+        return "No Signal", 0.0
 
 # Backtesting strategy performance
 def backtest_strategy(data):
@@ -84,7 +89,8 @@ def backtest_strategy(data):
         cumulative_strategy_return = (1 + data["Strategy Return"]).cumprod()
         return cumulative_strategy_return, data
     except Exception as e:
-        raise ValueError(f"Error during backtesting: {e}")
+        st.error(f"Error during backtesting: {e}")
+        return pd.Series(), data
 
 # Plotting function using Matplotlib
 def plot_chart(data, signal, entry_price, stop_loss, take_profit):
@@ -116,22 +122,26 @@ data = fetch_data(ticker_symbol, period="5d", interval="15m")
 if not data.empty:
     try:
         signal, entry_price = generate_signal(data)
-        stop_loss = float(entry_price * 0.995)
-        take_profit = float(entry_price + (entry_price - stop_loss) * risk_reward_ratio)
-        lot_size = calculate_lot_size(account_balance, risk_percentage, entry_price, stop_loss)
+        if entry_price == 0:
+            st.error("Failed to generate a valid entry price.")
+        else:
+            stop_loss = float(entry_price * 0.995)
+            take_profit = float(entry_price + (entry_price - stop_loss) * risk_reward_ratio)
+            lot_size = calculate_lot_size(account_balance, risk_percentage, entry_price, stop_loss)
 
-        st.write(f"### Trade Signal for {selected_pair}")
-        st.write(f"- Signal: **{signal}**")
-        st.write(f"- Entry Price: **{entry_price:.2f}**")
-        st.write(f"- Stop Loss: **{stop_loss:.2f}**")
-        st.write(f"- Take Profit: **{take_profit:.2f}**")
-        st.write(f"- Lot Size: **{lot_size:.2f}**")
+            st.write(f"### Trade Signal for {selected_pair}")
+            st.write(f"- Signal: **{signal}**")
+            st.write(f"- Entry Price: **{entry_price:.2f}**")
+            st.write(f"- Stop Loss: **{stop_loss:.2f}**")
+            st.write(f"- Take Profit: **{take_profit:.2f}**")
+            st.write(f"- Lot Size: **{lot_size:.2f}**")
 
-        cumulative_strategy_return, backtest_data = backtest_strategy(data)
-        st.write("### Backtest Performance")
-        st.line_chart(cumulative_strategy_return)
+            cumulative_strategy_return, backtest_data = backtest_strategy(data)
+            if not cumulative_strategy_return.empty:
+                st.write("### Backtest Performance")
+                st.line_chart(cumulative_strategy_return)
 
-        plot_chart(data, signal, entry_price, stop_loss, take_profit)
+            plot_chart(data, signal, entry_price, stop_loss, take_profit)
     except Exception as e:
         st.error(f"An error occurred: {e}")
 else:
