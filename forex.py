@@ -65,7 +65,7 @@ def generate_signal(data):
         if data.empty or pd.isna(data["Close"].iloc[-1]):
             raise ValueError("Data is invalid or insufficient for generating signals.")
 
-        last_close = float(data["Close"].iloc[-1])
+        last_close = data["Close"].iloc[-1]
         if pd.isna(last_close) or not isinstance(last_close, (int, float)):
             raise ValueError("Invalid close price.")
 
@@ -122,7 +122,8 @@ data = fetch_data(ticker_symbol, period="5d", interval="15m")
 if not data.empty:
     try:
         signal, entry_price = generate_signal(data)
-        if entry_price == 0:
+        st.write(f"Debug - Entry Price: {entry_price}")  # Debugging entry_price
+        if entry_price == 0 or pd.isna(entry_price):
             st.error("Failed to generate a valid entry price.")
         else:
             stop_loss = float(entry_price * 0.995)
